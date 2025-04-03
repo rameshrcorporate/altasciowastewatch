@@ -1,0 +1,9 @@
+streamlit
+pandas
+openai
+tiktoken
+python-dotenv
+sqlalchemy
+psycopg2-binary
+plotly
+prophet
