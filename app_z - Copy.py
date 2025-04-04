@@ -37,6 +37,181 @@ def get_table_columns(engine, table_name="food_waste"):
         columns = [row[0] for row in result.fetchall()]
     return columns
 
+# def generate_required_column_patcher(df: pd.DataFrame):
+    # related_columns = []
+
+    # columns_lower = [col.lower() for col in df.columns]
+    # if "weight" in columns_lower and "unit" in columns_lower:
+        # related_columns.append(("weight", "unit"))
+    # if "cost" in columns_lower and "currency" in columns_lower:
+        # related_columns.append(("cost", "currency"))
+
+    # def patch_sql(sql: str) -> str:
+        # sql_lower = sql.lower()
+        # select_index = sql_lower.find("select")
+        # from_index = sql_lower.find("from")
+
+        # if select_index == -1 or from_index == -1:
+            # return sql  # invalid or non-standard SQL
+
+        # select_clause = sql[select_index + 6:from_index].strip()
+
+        # patched = False
+        # additional_fields = []
+
+        # for main_col, required_col in related_columns:
+            # if main_col in sql_lower and required_col not in sql_lower:
+                # additional_fields.append(required_col)
+                # patched = True
+
+        # if patched:
+            # new_select_clause = ", ".join(additional_fields + [select_clause])
+            # return f"SELECT {new_select_clause} {sql[from_index:]}"
+        # return sql
+
+    # return patch_sql
+    
+import re
+
+def generate_required_column_patcher(df: pd.DataFrame):
+    related_columns = []
+
+    columns_lower_map = {col.lower(): col for col in df.columns}
+
+    if "weight" in columns_lower_map and "unit" in columns_lower_map:
+        related_columns.append(("weight", "unit"))
+    if "cost" in columns_lower_map and "currency" in columns_lower_map:
+        related_columns.append(("cost", "currency"))
+
+    def patch_sql(sql: str) -> str:
+        sql_lower = sql.lower()
+        select_index = sql_lower.find("select")
+        from_index = sql_lower.find("from")
+
+        if select_index == -1 or from_index == -1:
+            return sql  # invalid or non-standard SQL
+
+        select_clause = sql[select_index + 6:from_index].strip()
+        patched = False
+        additional_fields = []
+
+        # Match GROUP BY clause content
+        groupby_match = re.search(r"group by (.+?)( order by| limit|;|$)", sql_lower)
+        if groupby_match:
+            groupby_raw = groupby_match.group(1)
+            groupby_columns = [col.strip().strip('"') for col in groupby_raw.split(",")]
+        else:
+            groupby_columns = []
+
+        for main_col, required_col in related_columns:
+            if main_col in sql_lower and required_col not in sql_lower:
+                required_col_real = columns_lower_map.get(required_col, required_col)
+                required_col_quoted = f'"{required_col_real}"'
+                additional_fields.append(required_col_quoted)
+
+                if required_col_real not in groupby_columns:
+                    groupby_columns.append(required_col_real)
+
+                patched = True
+
+        if patched:
+            # Update SELECT clause
+            new_select_clause = ", ".join(additional_fields + [select_clause])
+            patched_sql = f"SELECT {new_select_clause} {sql[from_index:]}"
+
+            # Update GROUP BY clause if it exists
+            if groupby_match:
+                new_groupby_clause = ", ".join(f'"{columns_lower_map.get(col.lower(), col)}"' for col in groupby_columns)
+                patched_sql = re.sub(r"group by .+?( order by| limit|;|$)",
+                                     f"GROUP BY {new_groupby_clause}\\1", patched_sql, flags=re.IGNORECASE)
+
+            return patched_sql
+
+        return sql
+
+    return patch_sql
+
+
+
+
+
+def generate_column_descriptions(df: pd.DataFrame) -> str:
+    sample_values = {
+        col: df[col].dropna().unique()[:3].tolist()
+        for col in df.columns
+    }
+
+    descriptions = []
+    columns_lower = [c.lower() for c in df.columns]
+
+    for col in df.columns:
+        col_lower = col.lower()
+
+        if col_lower == "weight" and "unit" in columns_lower:
+            descriptions.append(f"- '{col}': Quantity of food waste, measured in 'Unit'.")
+        elif col_lower == "unit":
+            descriptions.append(f"- '{col}': Measurement unit (e.g., kg, grams).")
+        elif col_lower == "cost" and "currency" in columns_lower:
+            descriptions.append(f"- '{col}': Monetary value of waste, expressed in 'Currency'.")
+        elif col_lower == "currency":
+            descriptions.append(f"- '{col}': Currency used for cost values (e.g., AED, USD).")
+        elif col_lower == "loss reason":
+            descriptions.append(f"- '{col}': Reason why the food was wasted.")
+        elif col_lower == "disposition":
+            descriptions.append(f"- '{col}': How the waste was handled (e.g., composted, disposed).")
+        elif col_lower == "food item":
+            descriptions.append(f"- '{col}': Specific food item being wasted.")
+        elif col_lower == "food item category":
+            descriptions.append(f"- '{col}': Group/category of the food item.")
+        elif col_lower == "operator":
+            descriptions.append(f"- '{col}': Person or staff member who logged the entry.")
+        elif col_lower == "site":
+            descriptions.append(f"- '{col}': Facility or location where waste occurred.")
+        elif col_lower == "location":
+            descriptions.append(f"- '{col}': Sub-location within the site.")
+        elif col_lower == "device":
+            descriptions.append(f"- '{col}': Device used to capture the entry.")
+        elif col_lower == "date":
+            descriptions.append(f"- '{col}': Date of the food waste entry.")
+        elif col_lower == "time":
+            descriptions.append(f"- '{col}': Time of the food waste entry.")
+        elif col_lower == "region":
+            descriptions.append(f"- '{col}': Geographic region.")
+        elif col_lower == "country":
+            descriptions.append(f"- '{col}': Country code or name.")
+        elif col_lower == "stage of processing":
+            descriptions.append(f"- '{col}': Phase of food processing (e.g., Pre-Consumer).")
+        elif col_lower == "segment":
+            descriptions.append(f"- '{col}': Business segment (e.g., Healthcare, Energy).")
+        elif col_lower == "edited":
+            descriptions.append(f"- '{col}': Indicates if the entry was edited (1 = yes, 0 = no).")
+        elif col_lower == "quantity":
+            descriptions.append(f"- '{col}': Number of items or units involved.")
+        elif col_lower == "duration":
+            descriptions.append(f"- '{col}': Duration (e.g., in seconds) possibly related to disposal or operation.")
+        elif col_lower == "portions":
+            descriptions.append(f"- '{col}': Number of food portions affected (if available).")
+        elif col_lower == "source":
+            descriptions.append(f"- '{col}': Source location or process where the waste came from.")
+        elif col_lower == "container":
+            descriptions.append(f"- '{col}': Type of container used (e.g., No Pan).")
+        elif col_lower == "client location id":
+            descriptions.append(f"- '{col}': Client-specific ID for the location.")
+        elif col_lower == "client food item id":
+            descriptions.append(f"- '{col}': Client-specific ID for the food item.")
+        elif col_lower == "event order no.":
+            descriptions.append(f"- '{col}': Identifier used for tracking specific disposal events.")
+        else:
+            # Generic fallback using sample values
+            values = sample_values.get(col, [])
+            if values:
+                sample_snippet = ", ".join(map(str, values))
+                descriptions.append(f"- '{col}': Sample values include {sample_snippet}.")
+            else:
+                descriptions.append(f"- '{col}': Column in the dataset (no sample values available).")
+
+    return "\n".join(descriptions)
+
 
     
 def extract_filters_from_question(question: str, table_columns: list):
@@ -57,32 +232,6 @@ def extract_filters_from_question(question: str, table_columns: list):
         filters["Date"] = (first_day.strftime("%Y-%m-%d"), last_day.strftime("%Y-%m-%d"))
 
     return filters
-
-def generate_query_context(df: pd.DataFrame, sample_limit: int = 5, list_limit: int = 100) -> str:
-    if df.empty:
-        return "The query returned no data."
-
-    lines = [f"The query returned {len(df)} rows and {len(df.columns)} columns."]
-
-    if len(df.columns) == 1:
-        col = df.columns[0]
-        if len(df) <= list_limit:
-            # If small result set, list all values
-            all_vals = df[col].dropna().unique().tolist()
-            val_list = ", ".join(map(str, all_vals))
-            lines.append(f"The single column is '{col}', and it contains the following values:\n{val_list}")
-        else:
-            # Fallback to limited preview
-            sample_vals = df[col].dropna().unique()[:sample_limit]
-            lines.append(f"The result has a single column: '{col}' with sample values like: {', '.join(map(str, sample_vals))}.")
-    else:
-        lines.append("The columns in the result are:")
-        for col in df.columns:
-            sample_vals = df[col].dropna().unique()[:sample_limit]
-            sample_str = ", ".join(map(str, sample_vals))
-            lines.append(f"- {col}: sample values → {sample_str}")
-
-    return "\n".join(lines)
 
 
 def build_sql_query(filters: dict, limit=100):
@@ -129,55 +278,227 @@ Do not explain the query. Only return the raw SQL statement. Do not wrap it in m
     sql_raw = response.choices[0].message.content.strip()
     sql_clean = sql_raw.strip("`").replace("```sql", "").replace("```", "").strip()
     return sql_clean
+    
+from openai import OpenAI
+import pandas as pd
+from sqlalchemy import text
 
-def ask_data_question_from_db(question: str, engine) -> dict:
-    try:
-        table_columns = get_table_columns(engine)
-        sql = generate_sql_from_question(question, table_columns)
-        df = pd.read_sql(text(sql), engine)
-        
-        if "Weight" in df.columns and "Unit" in df.columns:
-            df["Weight"] = df["Weight"].astype(str) + " " + df["Unit"].astype(str)
-            # df = df.drop(columns=["Unit"]) 
-        
-        if df.empty:
-            return {"sql": sql, "answer": "⚠️ No data found for your query."}
+def generate_column_descriptions(df: pd.DataFrame) -> str:
+    sample_values = {
+        col: df[col].dropna().unique()[:3].tolist()
+        for col in df.columns
+    }
 
-        #data_preview = df.head(10)
-        # preview_md = data_preview.to_markdown(index=False)
-        summary = f"{len(df)} rows returned with {len(df.columns)} columns."
-            
-        context = generate_query_context(df)    
+    descriptions = []
+    columns_lower = [c.lower() for c in df.columns]
 
-        # explain_prompt = f"""
-        # Here is a sample of the data returned from the query:
-        explain_prompt = f"""
-        You are a helpful data analyst.
+    for col in df.columns:
+        col_lower = col.lower()
 
-        {context}
+        if col_lower == "weight" and "unit" in columns_lower:
+            descriptions.append(f"- '{col}': Quantity of food waste, measured in 'Unit'.")
+        elif col_lower == "unit":
+            descriptions.append(f"- '{col}': Measurement unit (e.g., kg, grams).")
+        elif col_lower == "cost" and "currency" in columns_lower:
+            descriptions.append(f"- '{col}': Monetary value of waste, expressed in 'Currency'.")
+        elif col_lower == "currency":
+            descriptions.append(f"- '{col}': Currency used for cost values (e.g., AED, USD).")
+        elif col_lower == "loss reason":
+            descriptions.append(f"- '{col}': Reason why the food was wasted.")
+        elif col_lower == "disposition":
+            descriptions.append(f"- '{col}': How the waste was handled (e.g., composted, disposed).")
+        elif col_lower == "food item":
+            descriptions.append(f"- '{col}': Specific food item being wasted.")
+        elif col_lower == "food item category":
+            descriptions.append(f"- '{col}': Group or category of the food item.")
+        elif col_lower == "operator":
+            descriptions.append(f"- '{col}': Person or staff member who logged the entry.")
+        elif col_lower == "site":
+            descriptions.append(f"- '{col}': Facility or location where waste occurred.")
+        elif col_lower == "location":
+            descriptions.append(f"- '{col}': Sub-location within the site.")
+        elif col_lower == "device":
+            descriptions.append(f"- '{col}': Device used to capture the entry.")
+        elif col_lower == "date":
+            descriptions.append(f"- '{col}': Date of the food waste entry.")
+        elif col_lower == "time":
+            descriptions.append(f"- '{col}': Time of the food waste entry.")
+        elif col_lower == "region":
+            descriptions.append(f"- '{col}': Geographic region.")
+        elif col_lower == "country":
+            descriptions.append(f"- '{col}': Country code or name.")
+        elif col_lower == "stage of processing":
+            descriptions.append(f"- '{col}': Phase of food processing (e.g., Pre-Consumer).")
+        elif col_lower == "segment":
+            descriptions.append(f"- '{col}': Business segment (e.g., Healthcare, Energy).")
+        elif col_lower == "edited":
+            descriptions.append(f"- '{col}': Indicates if the entry was edited (1 = yes, 0 = no).")
+        elif col_lower == "quantity":
+            descriptions.append(f"- '{col}': Number of items or units involved.")
+        elif col_lower == "duration":
+            descriptions.append(f"- '{col}': Duration in seconds (possibly related to operation time).")
+        elif col_lower == "portions":
+            descriptions.append(f"- '{col}': Number of food portions affected.")
+        elif col_lower == "source":
+            descriptions.append(f"- '{col}': Origin of the waste (e.g., Hot Line, Cold Prep).")
+        elif col_lower == "container":
+            descriptions.append(f"- '{col}': Type of container used (e.g., No Pan).")
+        elif col_lower == "client location id":
+            descriptions.append(f"- '{col}': Client-specific ID for the site.")
+        elif col_lower == "client food item id":
+            descriptions.append(f"- '{col}': Client-specific ID for the food item.")
+        elif col_lower == "event order no.":
+            descriptions.append(f"- '{col}': Order number used to track the waste event.")
+        else:
+            values = sample_values.get(col, [])
+            if values:
+                sample_snippet = ", ".join(map(str, values))
+                descriptions.append(f"- '{col}': Sample values include {sample_snippet}.")
+            else:
+                descriptions.append(f"- '{col}': Column in the dataset (no sample values available).")
 
-        Now answer the user's question:
+    return "\n".join(descriptions)
+
+
+def ask_data_question_from_db(question: str, engine, client: OpenAI):
+    table_columns = get_table_columns(engine)
+    df_sample = pd.read_sql(text("SELECT * FROM food_waste LIMIT 50"), engine)
+    sql = generate_sql_from_question(question, table_columns)
+    patch_sql_func = generate_required_column_patcher(df_sample)  # df = actual full table or sample data
+    sql = patch_sql_func(sql)
+    df = pd.read_sql(text(sql), engine)
+
+    if df.empty:
+        return {"sql": sql, "answer": "⚠️ No data found for your query."}
+
+    data_preview = df.head(10)
+    preview_md = data_preview.to_markdown(index=False)
+    column_context = generate_column_descriptions(df)
+
+    explain_prompt = f"""
+        You are analyzing food waste data from a PostgreSQL table named 'food_waste'.
+
+        Here are descriptions of the table columns:
+        {column_context}
+
+        Below is a sample of the data returned from the query:
+
+        {preview_md}
+
+        Now, based on this data, answer the user's question:
         {question}
         """
 
-        response = client.chat.completions.create(
-            model="gpt-4-1106-preview",
-            messages=[
-                {"role": "system", "content": "You are a helpful data analyst who explains query results."},
-                {"role": "user", "content": explain_prompt}
-            ],
-            max_tokens=400,
-            temperature=0.3
-        )
+    response = client.chat.completions.create(
+        model="gpt-4-1106-preview",
+        messages=[
+            {"role": "system", "content": "You are a helpful data analyst who explains query results."},
+            {"role": "user", "content": explain_prompt}
+        ],
+        max_tokens=400,
+        temperature=0.3
+    )
 
-        return {
-            "sql": sql,
+    return {"sql": sql, "answer": response.choices[0].message.content.strip()}
+
+
+# def ask_data_question_from_db(question: str, engine) -> dict:
+    # try:
+        # from textwrap import dedent
+
+        # table_columns = get_table_columns(engine)
+        # sql = generate_sql_from_question(question, table_columns)
+        # df = pd.read_sql(text(sql), engine)
+
+        # if df.empty:
+            # return {"sql": sql, "answer": "⚠️ No data found for your query."}
+
+        # data_preview = df.head(10)
+        # preview_md = data_preview.to_markdown(index=False)
+
+        # # Optional: add semantic meaning to relevant columns
+        # column_notes = []
+
+        # if "Weight" in table_columns and "Unit" in table_columns:
+            # column_notes.append("- 'Weight' indicates the quantity of food waste, measured in 'Unit' (e.g., kg, grams).")
+
+        # if "Cost" in table_columns and "Currency" in table_columns:
+            # column_notes.append("- 'Cost' reflects the monetary value of waste, using 'Currency' for the unit.")
+
+        # if "Loss Reason" in table_columns:
+            # column_notes.append("- 'Loss Reason' captures the reason for food waste (e.g., overproduction, spoilage).")
+
+        # if "Disposition" in table_columns:
+            # column_notes.append("- 'Disposition' describes how the waste was handled (e.g., disposed, composted).")
+
+        # if "Food Item Category" in table_columns:
+            # column_notes.append("- 'Food Item Category' groups items like Bread, Starch, Vegetables, etc.")
+
+        # column_context = "\n".join(column_notes)
+
+        # # 🧠 GPT-friendly prompt
+        # explain_prompt = dedent(f"""
+            # You are analyzing food waste data from a PostgreSQL table called 'food_waste'.
+            # The table includes the following columns:
+
+            # {', '.join(table_columns)}
+
+            # {column_context}
+
+            # Below is a sample of the data returned from a query:
+
+            # {preview_md}
+
+            # Now answer the user's question:
+            # {question}
+        # """)
+
+        # response = client.chat.completions.create(
+            # model="gpt-4-1106-preview",
+            # messages=[
+                # {"role": "system", "content": "You are a helpful data analyst who explains query results."},
+                # {"role": "user", "content": explain_prompt}
+            # ],
+            # max_tokens=400,
+            # temperature=0.3
+        # )
+        # # table_columns = get_table_columns(engine)
+        # # sql = generate_sql_from_question(question, table_columns)
+        # # df = pd.read_sql(text(sql), engine)
+
+        # # if df.empty:
+            # # return {"sql": sql, "answer": "⚠️ No data found for your query."}
+
+        # # data_preview = df.head(10)
+        # # preview_md = data_preview.to_markdown(index=False)
+
+        # # explain_prompt = f"""
+        # # Here is a sample of the data returned from the query:
+
+        # # {preview_md}
+
+        # # Now answer the user's question:
+        # # {question}
+        # # """
+
+        # # response = client.chat.completions.create(
+            # # model="gpt-4-1106-preview",
+            # # messages=[
+                # # {"role": "system", "content": "You are a helpful data analyst who explains query results."},
+                # # {"role": "user", "content": explain_prompt}
+            # # ],
+            # # max_tokens=400,
+            # # temperature=0.3
+        # # )
+
+        # return {
+            # "sql": sql,
             # "table_preview": data_preview,
-            "answer": response.choices[0].message.content.strip()
-        }
+            # "answer": response.choices[0].message.content.strip()
+        # }
 
-    except Exception as e:
-        return {"sql": None, "table_preview": None, "answer": f"❌ Error: {str(e)}"}
+    # except Exception as e:
+        # return {"sql": None, "table_preview": None, "answer": f"❌ Error: {str(e)}"}
 
 
 
@@ -598,7 +919,6 @@ def main():
     if uploaded_file:
         df = load_raw_data(uploaded_file)
 
-
         if "Currency" in df.columns:
             currency_values = df["Currency"].dropna().unique()
             currency = currency_values[0] if len(currency_values) == 1 else ""
@@ -609,8 +929,9 @@ def main():
 
         # ✅ Run GPT based on question (after file load)
         if user_question:
-            with st.spinner("🤖 Hold on a sec..."):
-                result = ask_data_question_from_db(user_question, engine)
+            with st.spinner("🤖 GPT is thinking..."):
+                #result = ask_data_question_from_db(user_question, engine)
+                result = ask_data_question_from_db(user_question, engine, client)
 
     # ✅ Show GPT output (always below input)
     if result and result.get("answer"):

@@ -58,32 +58,6 @@ def extract_filters_from_question(question: str, table_columns: list):
 
     return filters
 
-def generate_query_context(df: pd.DataFrame, sample_limit: int = 5, list_limit: int = 100) -> str:
-    if df.empty:
-        return "The query returned no data."
-
-    lines = [f"The query returned {len(df)} rows and {len(df.columns)} columns."]
-
-    if len(df.columns) == 1:
-        col = df.columns[0]
-        if len(df) <= list_limit:
-            # If small result set, list all values
-            all_vals = df[col].dropna().unique().tolist()
-            val_list = ", ".join(map(str, all_vals))
-            lines.append(f"The single column is '{col}', and it contains the following values:\n{val_list}")
-        else:
-            # Fallback to limited preview
-            sample_vals = df[col].dropna().unique()[:sample_limit]
-            lines.append(f"The result has a single column: '{col}' with sample values like: {', '.join(map(str, sample_vals))}.")
-    else:
-        lines.append("The columns in the result are:")
-        for col in df.columns:
-            sample_vals = df[col].dropna().unique()[:sample_limit]
-            sample_str = ", ".join(map(str, sample_vals))
-            lines.append(f"- {col}: sample values → {sample_str}")
-
-    return "\n".join(lines)
-
 
 def build_sql_query(filters: dict, limit=100):
     base = 'SELECT * FROM "food_waste"'
@@ -135,26 +109,18 @@ def ask_data_question_from_db(question: str, engine) -> dict:
         table_columns = get_table_columns(engine)
         sql = generate_sql_from_question(question, table_columns)
         df = pd.read_sql(text(sql), engine)
-        
-        if "Weight" in df.columns and "Unit" in df.columns:
-            df["Weight"] = df["Weight"].astype(str) + " " + df["Unit"].astype(str)
-            # df = df.drop(columns=["Unit"]) 
-        
+
         if df.empty:
             return {"sql": sql, "answer": "⚠️ No data found for your query."}
 
-        #data_preview = df.head(10)
-        # preview_md = data_preview.to_markdown(index=False)
-        summary = f"{len(df)} rows returned with {len(df.columns)} columns."
-            
-        context = generate_query_context(df)    
+        data_preview = df.head(10)
+        preview_md = data_preview.to_markdown(index=False)
 
         # explain_prompt = f"""
         # Here is a sample of the data returned from the query:
         explain_prompt = f"""
-        You are a helpful data analyst.
-
-        {context}
+        Here is the result of the query executed on the full dataset: 
+        {preview_md}
 
         Now answer the user's question:
         {question}
@@ -172,7 +138,7 @@ def ask_data_question_from_db(question: str, engine) -> dict:
 
         return {
             "sql": sql,
-            # "table_preview": data_preview,
+            "table_preview": data_preview,
             "answer": response.choices[0].message.content.strip()
         }
 
